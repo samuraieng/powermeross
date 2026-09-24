@@ -1,9 +1,11 @@
 import asyncio
 import ipaddress
+import logging
 import os
 import re
 import socket
 import subprocess
+import sys
 
 from datetime import datetime
 from meross_iot.http_api import MerossHttpClient
@@ -13,6 +15,17 @@ EMAIL = os.environ["MEROSS_UID"]
 PASSWORD = os.environ["MEROSS_PID"]
 TARGET_UUID = os.environ["MEROSS_TID"]
 HOME_NET = ipaddress.ip_network("192.168.1.0/24")
+
+# meross_iot が import 時に basicConfig を実行済みのため、force=True で上書きしないと設定が無視される
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    stream=sys.stdout,
+    force=True,
+)
+# ライブラリ側の INFO / WARNING はノイズなので ERROR 以上のみ残す
+logging.getLogger("meross_iot").setLevel(logging.ERROR)
 
 def in_home_network() -> bool:
     # デフォルトルート向けの自分のIPを取得(パケットは送らない)
@@ -43,14 +56,14 @@ async def set_power(turn_on: bool):
         await dev.async_update()
         if turn_on and not dev.is_on():
             await dev.async_turn_on(channel=0)
-            print(f"{dev.name}: OFF -> ON")
+            logging.info(f"{dev.name}: OFF -> ON")
         elif not turn_on and dev.is_on():
             await dev.async_turn_off(channel=0)
-            print(f"{dev.name}: ON -> OFF")
+            logging.info(f"{dev.name}: ON -> OFF")
         else:
-            print(f"{dev.name}: 変更なし (is_on={dev.is_on()})")
+            logging.info(f"{dev.name}: 変更なし (is_on={dev.is_on()})")
     else:
-        print("デバイスが見つかりません")
+        logging.warning("デバイスが見つかりません")
 
     manager.close()
     await client.async_logout()
@@ -64,18 +77,19 @@ def thresholds(hour: int):
 def main():
     on_below, off_at = thresholds(datetime.now().hour)
 
-    if not in_home_network():
-        print("自宅ネットワーク外なのでスキップ")
-        return
+    # Skip due to VPN
+    #if not in_home_network():
+    #    logging.info("自宅ネットワーク外なのでスキップ")
+    #    return
 
     pct = battery_percent()
-    print(f"バッテリー残量: {pct}%")
+    logging.info(f"バッテリー残量: {pct}%")
 
     if pct <= on_below:
         asyncio.run(set_power(True))
     elif pct >= off_at:
         asyncio.run(set_power(False))
     else:
-        print(f"{on_below}% < 残量 < {off_at}% のため何もしない")
+        logging.info(f"{on_below}% < 残量 < {off_at}% のため何もしない")
 
 main()
